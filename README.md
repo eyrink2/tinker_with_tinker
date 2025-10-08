@@ -38,7 +38,7 @@ You will use **Tinker**, the cutting-edge training API developed by Thinking Mac
 
 ## Environment Setup
 
-1. Install required packages (we suggest you install them in Conda environment):
+1. Install required packages (we suggest you install them in [Conda environment](https://docs.conda.io/projects/conda/en/stable/user-guide/install/index.html)):
    ```bash
    pip install tinker
    pip install git+https://github.com/thinking-machines-lab/tinker-cookbook.git
