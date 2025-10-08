@@ -76,6 +76,10 @@ class WinRateVsBaseOnTestEvaluator(SamplingClientEvaluator):
             A dictionary with keys "win_rate_vs_base" and "stderr_vs_base".
         """
         # TODO: Add your code here.
+        # Note that for using the rubric RM to compute the reward for a pair of responses,
+        # you are calling Tinker API to get the model response. You are suggested to make
+        # the calls asynchronously for better efficiency. You can use asyncio.gather to
+        # achieve that.
         win_rate = 0.0  # placeholder
         stderr = 0.0  # placeholder
         return {"win_rate_vs_base": win_rate, "stderr_vs_base": stderr}

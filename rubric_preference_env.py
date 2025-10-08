@@ -133,4 +133,8 @@ class PrometheusEvalPairwisePreferenceGroupBuilder(EnvGroupBuilder):
         2. Formatting reward based on whether the response is valid (1.0 if valid else -1.0).
         """
         # TODO: add your code here
+        # Note that for using the rubric RM to compute the reward for a pair of responses,
+        # you are calling Tinker API to get the model response. You are suggested to make
+        # the calls asynchronously for better efficiency. You can use asyncio.gather to
+        # achieve that.
         pass
