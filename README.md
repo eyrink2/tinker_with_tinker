@@ -1,6 +1,6 @@
 # CS329X HW2: Deep Personalization with Tinker
 
-**Due [TODO]**
+**Due: Thursday, Oct 30, 2025 at 11:59 PM PT**
 
 100 points total + 40 points extra credit
 
