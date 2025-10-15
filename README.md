@@ -2,18 +2,22 @@
 
 **Due: Thursday, Oct 30, 2025 at 11:59 PM PT**
 
-100 points total + 40 points extra credit
+* Students taking CS329X for **3-units**: 100 points total + 20 points extra credit
+* Students taking CS329X for **4-units**: 120 points total + 20 points extra credit
 
 ## Overview
 
-In this assignment, you will experiment with three different approaches to personalize an LLM to generate emails in your style:
+In this assignment, you will experiment with four different approaches to personalize an LLM to generate emails in your style:
 1. **Prompt Engineering** - Using system prompts to guide model behavior
 2. **Supervised Fine-tuning (SFT) with Synthetic Data** - Training on personalized examples
 3. **Reinforcement Learning from AI Feedback (RLAIF)** - Using a reward model to optimize for personalized rubric
+4. **Experimenting with [Demonstration-Iterated Task Optimization (DITTO)](https://arxiv.org/pdf/2406.00888)** - Efficiently generating online comparison data
 
-We also set two bonuses:
-1. Coming up with your own task rather than the default (i.e., email generation). (10 points)
-2. Experimenting with [Demonstration-Iterated Task Optimization (DITTO)](https://arxiv.org/pdf/2406.00888). (30 points)
+> Note: Part 4, **Experimenting with DITTO**, is optional for students taking 3-units and mandatory for students taking 4-units.
+
+We also set one bonus:
+* Coming up with your own task rather than the default (i.e., email generation). (20 points)
+
 
 You will use **Tinker**, the cutting-edge training API developed by Thinking Machine Labs, for this assignment. Tinker handles the heavy computation for forward and backward passes, allowing you to complete the assignment on your laptop despite the model training requirements.
 
@@ -30,6 +34,7 @@ You will use **Tinker**, the cutting-edge training API developed by Thinking Mac
 - **`scripts/sft.py`** - Script for supervised fine-tuning using synthetic personalized data
 - **`scripts/train_rubric_rm.py`** - Script for training a reward model using the Prometheus evaluation framework
 - **`scripts/rl_with_rubric_rm.py`** - Script for reinforcement learning training using your trained reward model
+- **`scripts/ditto_dpo.py`** - Script for performing Demonstrated-Iterated Task Optimization (DITTO)
 
 ### Supporting Modules
 
@@ -59,6 +64,7 @@ You must submit a **ZIP file** containing:
    - `scripts/sft.py`
    - `scripts/train_rubric_rm.py` 
    - `scripts/rl_with_rubric_rm.py`
+   - `scripts/ditto_dpo.py`
    - `rubric_preference_env.py`
    - `rubric_preference_types.py`
 

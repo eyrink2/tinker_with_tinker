@@ -7,7 +7,7 @@
 
 ## Setup & Data Collection
 
-### Data Source Description (Bonus: 10 points)
+### Data Source Description (Bonus: 20 points)
 *If you're attempting the bonus by using a creative data source other than email generation, describe it here. Otherwise, write "Email generation (default task)".*
 
 **TODO: Add your answer or leave it empty if you did not attempt the bonus**
@@ -83,11 +83,11 @@ Make sure your response covers:
 
 **TODO: Add your analysis here**
 
-## Bonus: DITTO (30 points)
+## Extension: DITTO (20 points)
 
 ### Implementation
 
-**TODO: give the file name(s) where you implement the code**
+**TODO: Add a description of your implementation and choice of hyperparameters.**
 
 ### Launching DITTO run
 
