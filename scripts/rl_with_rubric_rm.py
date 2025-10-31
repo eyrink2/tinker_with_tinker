@@ -18,6 +18,7 @@ from rubric_preference_env import (
 from tinker_cookbook.tokenizer_utils import get_tokenizer
 from tinker_cookbook.rl import train
 
+from tinker_cookbook.rl.preference_envs import TournamentPattern  # Add import
 
 
 class WinRateVsBaseOnTestEvaluator(SamplingClientEvaluator):
@@ -75,15 +76,60 @@ class WinRateVsBaseOnTestEvaluator(SamplingClientEvaluator):
         Returns:
             A dictionary with keys "win_rate_vs_base" and "stderr_vs_base".
         """
-        # TODO: Add your code here.
-        # Note that for using the rubric RM to compute the reward for a pair of responses,
-        # you are calling Tinker API to get the model response. You are suggested to make
-        # the calls asynchronously for better efficiency. You can use asyncio.gather to
-        # achieve that.
-        win_rate = 0.0  # placeholder
-        stderr = 0.0  # placeholder
-        return {"win_rate_vs_base": win_rate, "stderr_vs_base": stderr}
+        
+        async def get_completion(client: tinker.SamplingClient, prompt: list) -> str:
+            model_input = self.policy_renderer.build_generation_prompt(prompt)
+            response = await client.sample_async(
+                model_input,
+                num_samples=1,
+                sampling_params=tinker.types.SamplingParams(
+                    max_tokens=self.max_tokens, temperature=0.0
+                ),
+            )
+            return self.policy_renderer.tokenizer.decode(response.sequences[0].tokens).strip()
 
+        # 1. Create and execute all generation tasks concurrently.
+        policy_gen_tasks = []
+        base_gen_tasks = []
+        for example in self.test_ds:
+            prompt = example["prompt_conversation"]
+            policy_gen_tasks.append(get_completion(sampling_client, prompt))
+            base_gen_tasks.append(get_completion(self.base_sampling_client, prompt))
+        
+        policy_responses = await asyncio.gather(*policy_gen_tasks)
+        base_responses = await asyncio.gather(*base_gen_tasks)
+
+        # 2. Create comparison tasks, formatting the data correctly.
+        comparison_tasks = []
+        for i, example in enumerate(self.test_ds):
+            # FIX: The PrometheusEvalComparison dataclass requires a list of Message dictionaries.
+            # The internal code then accesses this as `completion_A[0]["content"]`.
+            # We must wrap our raw response strings in this required format.
+            policy_completion_as_message = [{"role": "assistant", "content": policy_responses[i]}]
+            base_completion_as_message = [{"role": "assistant", "content": base_responses[i]}]
+
+            comparison = PrometheusEvalComparison(
+                prompt_conversation=example["prompt_conversation"],
+                completion_A=policy_completion_as_message,  # Pass the formatted message list
+                completion_B=base_completion_as_message,   # Pass the formatted message list
+                rubric=example["rubric"],
+                reference=example.get("reference"),
+            )
+            comparison_tasks.append(self.preference_model(comparison))
+            
+        # 3. Execute all comparison tasks concurrently.
+        preference_scores = await asyncio.gather(*comparison_tasks)
+        
+        # 4. Compute and return the final metrics.
+        wins = np.array([1.0 if score < 0 else 0.0 for score in preference_scores])
+        
+        if len(wins) == 0:
+            return {"win_rate_vs_base": 0.0, "stderr_vs_base": 0.0}
+
+        win_rate = np.mean(wins)
+        stderr = np.std(wins) / np.sqrt(len(wins))
+        
+        return {"win_rate_vs_base": win_rate, "stderr_vs_base": stderr}
 
 
 @chz.chz
@@ -141,6 +187,7 @@ def build_config(
         rm_model_name_for_tokenizer=reward_model_name,
         rm_model_path=reward_model_path,
         group_size=group_size,
+        tournament_pattern=TournamentPattern.ALL_PAIRS_BOTH_WAYS,
     )
 
     def winrate_eval_builder():
@@ -171,7 +218,7 @@ def build_config(
 def main(
     model_name: str = "Qwen/Qwen3-4B-Instruct-2507",
     reward_model_name: str = "Qwen/Qwen3-30B-A3B-Instruct-2507",
-    reward_model_path: str = "tinker://",  # TODO: add your model path here
+    reward_model_path: str = "tinker://4002e868-80df-4ad7-bab6-c37606d18439/sampler_weights/final",  # TODO: add your model path here
     train_data_path: str = "results/rl_train_data.jsonl",
     test_data_path: str = "results/rl_dev_data.jsonl",
     log_path: str = "results/rl_with_rubric_rm",

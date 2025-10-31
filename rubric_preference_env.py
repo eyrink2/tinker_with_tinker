@@ -28,6 +28,8 @@ from tinker_cookbook.rl.types import (
 from tinker_cookbook.tokenizer_utils import get_tokenizer, Tokenizer
 from tinker_cookbook.utils.misc_utils import safezip
 
+from tinker_cookbook.rl.preference_envs import TournamentPattern, get_pairs
+
 logger = logging.getLogger(__name__)
 
 
@@ -72,8 +74,25 @@ class PrometheusEvalPairwisePreferenceDataset(RLDataset):
 
     def get_batch(self, index: int) -> list[EnvGroupBuilder]:
         """Get a batch of EnvGroupBuilders for RL training."""
-        # TODO: add your code here
-        pass
+        start_index = index * self.batch_size
+        # Ensure the end index does not exceed the dataset length
+        end_index = min(start_index + self.batch_size, len(self.train_dataset))
+
+        env_group_builders = []
+        # Iterate by index to correctly access each row from the Hugging Face dataset.
+        for i in range(start_index, end_index):
+            item = self.train_dataset[i]
+            builder = PrometheusEvalPairwisePreferenceGroupBuilder(
+                convo_prefix=item["prompt_conversation"],
+                policy_renderer=self.dataset_builder.renderer,
+                tournament_pattern=self.tournament_pattern,
+                preference_model=self.preference_model,
+                rubric=item["rubric"],
+                reference=item["reference"],
+                num_envs=self.group_size,
+            )
+            env_group_builders.append(builder)
+        return env_group_builders
 
     def __len__(self) -> int:
         return len(self.train_dataset) // self.batch_size
@@ -107,6 +126,44 @@ class PrometheusEvalPairwisePreferenceRLDatasetBuilder(RLDatasetBuilder):
             group_size=self.group_size,
         ), None
 
+# # Remove the @chz.chz decorator and convert to a regular class
+# class PrometheusEvalPairwisePreferenceRLDatasetBuilder(RLDatasetBuilder):
+#     def __init__(
+#         self,
+#         comparison_dataset_builder: HFPrometheusEvalDatasetBuilder,
+#         rm_renderer_name: str,
+#         rm_model_name_for_tokenizer: str,
+#         batch_size: int,
+#         rm_model_path: str,
+#         group_size: int,
+#         tournament_pattern: TournamentPattern = TournamentPattern.ALL_PAIRS_BOTH_WAYS,
+#         base_url: str | None = None,
+#     ):
+#         self.comparison_dataset_builder = comparison_dataset_builder
+#         self.rm_renderer_name = rm_renderer_name
+#         self.rm_model_name_for_tokenizer = rm_model_name_for_tokenizer
+#         self.batch_size = batch_size
+#         self.tournament_pattern = tournament_pattern
+#         self.rm_model_path = rm_model_path
+#         self.group_size = group_size
+#         self.base_url = base_url
+
+#     async def __call__(self) -> tuple[PrometheusEvalPairwisePreferenceDataset, None]:
+#         tokenizer = get_tokenizer(self.rm_model_name_for_tokenizer)
+#         renderer = renderers.get_renderer(self.rm_renderer_name, tokenizer=tokenizer)
+
+#         return PrometheusEvalPairwisePreferenceDataset(
+#             dataset_builder=self.comparison_dataset_builder,
+#             batch_size=self.batch_size,
+#             preference_model=PrometheusEvalPreferenceModelFromChatRenderer(
+#                 convo_renderer=renderer,
+#                 sampling_client=tinker.ServiceClient(base_url=self.base_url).create_sampling_client(
+#                     model_path=self.rm_model_path
+#                 ),
+#             ),
+#             tournament_pattern=self.tournament_pattern,  # Pass it explicitly here
+#             group_size=self.group_size,
+#         ), None
 
 @dataclass(frozen=True)
 class PrometheusEvalPairwisePreferenceGroupBuilder(EnvGroupBuilder):
@@ -123,9 +180,7 @@ class PrometheusEvalPairwisePreferenceGroupBuilder(EnvGroupBuilder):
             PreferenceEnv(self.convo_prefix, self.policy_renderer) for _ in range(self.num_envs)
         ]
 
-    async def compute_group_rewards(
-        self, trajectory_group: list[Trajectory]
-    ) -> list[tuple[float, Metrics]]:
+    async def compute_group_rewards(self, trajectory_group: list[Trajectory]) -> list[tuple[float, Metrics]]:
         """Compute rewards for a group of trajectories using pairwise preference model.
         
         The reward for each trajectory is computed as the sum of:
@@ -137,4 +192,50 @@ class PrometheusEvalPairwisePreferenceGroupBuilder(EnvGroupBuilder):
         # you are calling Tinker API to get the model response. You are suggested to make
         # the calls asynchronously for better efficiency. You can use asyncio.gather to
         # achieve that.
-        pass
+        # 1. Reconstruct completions from trajectories based on the verified structure.
+        completions = []
+        for traj in trajectory_group:
+            # A trajectory is a list of transitions. Each transition has an action with tokens.
+            # We concatenate tokens from all transitions to get the full sequence.
+            all_tokens = [
+                token for transition in traj.transitions for token in transition.ac.tokens
+            ]
+            decoded_text = self.policy_renderer.tokenizer.decode(all_tokens).strip()
+            completions.append(decoded_text)
+
+        # 2. Calculate a simple formatting reward.
+        formatting_rewards = np.array(
+            [1.0 if text else -1.0 for text in completions]
+        )
+
+        # 3. Create tournament pairs.
+        # FIX: Pass the integer `self.num_envs`, not a range object.
+        pairs = get_pairs(self.num_envs, self.tournament_pattern)
+        
+        # 4. Asynchronously compare all pairs.
+        comparison_tasks = []
+        for i, j in pairs:
+            comparison = PrometheusEvalComparison(
+                prompt_conversation=self.convo_prefix,
+                completion_A=[{"role": "assistant", "content": completions[i]}],
+                completion_B=[{"role": "assistant", "content": completions[j]}],
+                rubric=self.rubric,
+                reference=self.reference,
+            )
+            comparison_tasks.append(self.preference_model(comparison))
+        
+        preference_scores = await asyncio.gather(*comparison_tasks)
+        
+        # 5. Aggregate tournament scores.
+        tournament_rewards = np.zeros(self.num_envs)
+        for (i, j), score in zip(pairs, preference_scores):
+            if score < 0:  # A wins
+                tournament_rewards[i] += 1.0
+                tournament_rewards[j] -= 1.0
+            elif score > 0:  # B wins
+                tournament_rewards[j] += 1.0
+                tournament_rewards[i] -= 1.0
+                
+        # 6. Combine rewards and return.
+        total_rewards = tournament_rewards + formatting_rewards
+        return [(reward, {}) for reward in total_rewards]
