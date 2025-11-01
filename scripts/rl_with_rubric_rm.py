@@ -78,50 +78,42 @@ class WinRateVsBaseOnTestEvaluator(SamplingClientEvaluator):
         """
         
         async def get_completion(client: tinker.SamplingClient, prompt: list) -> str:
+            """Generate a single completion from a client."""
             model_input = self.policy_renderer.build_generation_prompt(prompt)
             response = await client.sample_async(
                 model_input,
                 num_samples=1,
                 sampling_params=tinker.types.SamplingParams(
-                    max_tokens=self.max_tokens, temperature=0.0
+                    max_tokens=self.max_tokens, 
+                    temperature=0.0
                 ),
             )
             return self.policy_renderer.tokenizer.decode(response.sequences[0].tokens).strip()
 
-        # 1. Create and execute all generation tasks concurrently.
-        policy_gen_tasks = []
-        base_gen_tasks = []
-        for example in self.test_ds:
-            prompt = example["prompt_conversation"]
-            policy_gen_tasks.append(get_completion(sampling_client, prompt))
-            base_gen_tasks.append(get_completion(self.base_sampling_client, prompt))
+        # generate completions from both policies at the same time
+        policy_tasks = [get_completion(sampling_client, ex["prompt_conversation"]) for ex in self.test_ds]
+        base_tasks = [get_completion(self.base_sampling_client, ex["prompt_conversation"]) for ex in self.test_ds]
         
-        policy_responses = await asyncio.gather(*policy_gen_tasks)
-        base_responses = await asyncio.gather(*base_gen_tasks)
+        policy_responses = await asyncio.gather(*policy_tasks)
+        base_responses = await asyncio.gather(*base_tasks)
 
-        # 2. Create comparison tasks, formatting the data correctly.
+        # run pairwise comparisons
         comparison_tasks = []
         for i, example in enumerate(self.test_ds):
-            # FIX: The PrometheusEvalComparison dataclass requires a list of Message dictionaries.
-            # The internal code then accesses this as `completion_A[0]["content"]`.
-            # We must wrap our raw response strings in this required format.
-            policy_completion_as_message = [{"role": "assistant", "content": policy_responses[i]}]
-            base_completion_as_message = [{"role": "assistant", "content": base_responses[i]}]
-
+            # format responses as message dictionaries for the preference model
             comparison = PrometheusEvalComparison(
                 prompt_conversation=example["prompt_conversation"],
-                completion_A=policy_completion_as_message,  # Pass the formatted message list
-                completion_B=base_completion_as_message,   # Pass the formatted message list
+                completion_A=[{"role": "assistant", "content": policy_responses[i]}],
+                completion_B=[{"role": "assistant", "content": base_responses[i]}],
                 rubric=example["rubric"],
                 reference=example.get("reference"),
             )
             comparison_tasks.append(self.preference_model(comparison))
-            
-        # 3. Execute all comparison tasks concurrently.
+        
         preference_scores = await asyncio.gather(*comparison_tasks)
         
-        # 4. Compute and return the final metrics.
-        wins = np.array([1.0 if score < 0 else 0.0 for score in preference_scores])
+        # calculate win rate (negative score means policy wins)
+        wins = [1.0 if score < 0 else 0.0 for score in preference_scores]
         
         if len(wins) == 0:
             return {"win_rate_vs_base": 0.0, "stderr_vs_base": 0.0}

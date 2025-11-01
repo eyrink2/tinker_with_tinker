@@ -102,7 +102,6 @@ def main(
     wandb_project: str = "tinker_personalization",
     wandb_name: str = "prometheus_v2_preference_rm_qwen3_30b_a3b",
 ):
-    import asyncio # - needed for asyncio.run(train.main(config)), delete for submission
     load_dotenv()
     config = build_config(
         model_name=model_name,
@@ -115,8 +114,7 @@ def main(
         wandb_name=wandb_name,
     )
     cli_utils.check_log_dir(config.log_path, behavior_if_exists="ask")
-    asyncio.run(train.main(config)) # - this worked better, originally had train.main(config), delete for submission
-
+    train.main(config)
 
 if __name__ == "__main__":
     chz.entrypoint(main, allow_hyphens=True)
